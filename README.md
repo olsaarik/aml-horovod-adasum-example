@@ -17,7 +17,7 @@ This will submit the standard MNIST CNN model to train on a cluster of two NC24r
 
 ## Notes on using horovod-adasum
 
-Normally Azure Machine Learning handles installation of Horovod for you. For the horovod-adasum package we must ensure that it installs after Pytorch. The `submit.py` script included here handles this by installing Pytorch as a Conda package, and `horovod-adasum` as a pip package, which are installed after packages from Conda.
+Normally Azure Machine Learning handles installation of Horovod for you. For the `horovod-adasum` package we must ensure that it installs after Pytorch. The `submit.py` script included here handles this by installing Pytorch as a Conda package, and `horovod-adasum` as a pip package, which are installed after packages from Conda.
 
 ## Using Adasum in your own model
 
