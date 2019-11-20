@@ -6,24 +6,29 @@ import torch.optim as optim
 from torchvision import datasets, transforms
 import torch.utils.data.distributed
 import horovod.torch as hvd
+from azureml.core.run import Run
+
+run = Run.get_context()
 
 # Training settings
 parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
-parser.add_argument('--batch-size', type=int, default=64, metavar='N',
-                    help='input batch size for training (default: 64)')
+parser.add_argument('--batch-size', type=int, default=32, metavar='N',
+                    help='input batch size for training (default: 32)')
 parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
                     help='input batch size for testing (default: 1000)')
-parser.add_argument('--epochs', type=int, default=10, metavar='N',
+parser.add_argument('--epochs', type=int, default=2, metavar='N',
                     help='number of epochs to train (default: 10)')
-parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
-                    help='learning rate (default: 0.01)')
-parser.add_argument('--momentum', type=float, default=0.5, metavar='M',
-                    help='SGD momentum (default: 0.5)')
+parser.add_argument('--lr', type=float, default=0.03278, metavar='LR',
+                    help='learning rate (default: 0.03278)')
+parser.add_argument('--momentum', type=float, default=0.9, metavar='M',
+                    help='SGD momentum (default: 0.9)')
+parser.add_argument('--warmup', type=float, default=0.17886, metavar='W',
+                    help='warmup percentage (default: 0.17886)')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='disables CUDA training')
 parser.add_argument('--seed', type=int, default=42, metavar='S',
                     help='random seed (default: 42)')
-parser.add_argument('--log-interval', type=int, default=10, metavar='N',
+parser.add_argument('--log-interval', type=int, default=47, metavar='N',
                     help='how many batches to wait before logging training status')
 parser.add_argument('--fp16-allreduce', action='store_true', default=False,
                     help='use fp16 compression during allreduce')
@@ -71,16 +76,15 @@ test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=args.test_bat
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
-        self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
-        self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
-        self.conv2_drop = nn.Dropout2d()
-        self.fc1 = nn.Linear(320, 50)
-        self.fc2 = nn.Linear(50, 10)
+        self.conv1 = nn.Conv2d(1, 32, kernel_size=5, padding=2)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=5, padding=2)
+        self.fc1 = nn.Linear(7*7*64, 512)
+        self.fc2 = nn.Linear(512, 10)
 
     def forward(self, x):
         x = F.relu(F.max_pool2d(self.conv1(x), 2))
-        x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
-        x = x.view(-1, 320)
+        x = F.relu(F.max_pool2d(self.conv2(x), 2))
+        x = x.view(-1, 7*7*64)
         x = F.relu(self.fc1(x))
         x = F.dropout(x, training=self.training)
         x = self.fc2(x)
@@ -95,6 +99,15 @@ if args.cuda:
 
 optimizer = optim.SGD(model.parameters(), lr=args.lr,
                       momentum=args.momentum)
+
+# Linear warmup and decay from zero to max LR and back
+scheduler = optim.lr_scheduler.OneCycleLR(optimizer,
+    max_lr=args.lr,
+    total_steps=args.epochs*len(train_loader),
+    pct_start=args.warmup,
+    anneal_strategy='linear',
+    cycle_momentum=False,
+    div_factor=float("inf"))
 
 # Horovod: broadcast parameters & optimizer state.
 hvd.broadcast_parameters(model.state_dict(), root_rank=0)
@@ -122,12 +135,15 @@ def train(epoch):
         loss = F.nll_loss(output, target)
         loss.backward()
         optimizer.step()
+        scheduler.step()
         if batch_idx % args.log_interval == 0:
             # Horovod: use train_sampler to determine the number of examples in
             # this worker's partition.
             print('Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}'.format(
                 epoch, batch_idx * len(data), len(train_sampler),
                 100. * batch_idx / len(train_loader), loss.item()))
+            if hvd.rank() == 0:
+                run.log('loss', loss.item())
 
 
 def metric_average(val, name):
@@ -163,6 +179,7 @@ def test():
     if hvd.rank() == 0:
         print('\nTest set: Average loss: {:.4f}, Accuracy: {:.2f}%\n'.format(
             test_loss, 100. * test_accuracy))
+        run.log('accuracy', test_accuracy)
 
 
 for epoch in range(1, args.epochs + 1):
