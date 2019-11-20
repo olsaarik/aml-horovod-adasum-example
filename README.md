@@ -13,7 +13,7 @@ You can now submit an experiment to train MNIST with Pytorch:
 python submit.py
 ```
 
-This will submit the standard MNIST CNN model to train on a cluster of two NC24rs_v3 machines with 4 V100s each. The script is also configured to use Infiniband for communication between the machines.
+This will submit the standard MNIST CNN model to train on a cluster of eight NC24 machines with 4 K80s each.
 
 ## Notes on using horovod-adasum
 
